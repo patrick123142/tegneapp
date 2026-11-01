@@ -9,10 +9,11 @@
 // Viskelæderet ("visk") er en hvid streg, der tegnes i samme rækkefølge som alt andet
 // (efter tidspunkt). Den fjerner altså præcis det, den rører, uanset zoom og niveau,
 // og kan fortrydes. "Slet streg" fjerner derimod hele streger.
-const VERSION = 5; // bid 5: farver (farvehjul, gemte farver, pipette). Blyanter: tryk ændrer kun mørkhed, ikke bredde
+const VERSION = 5; // bid 5: farver. Rettelse 2: valgfri farveblanding og hurtigere tegning (mellemlager)
 
 const laerred = document.getElementById('laerred');
-const ctx = laerred.getContext('2d');
+const hovedCtx = laerred.getContext('2d');
+let ctx = hovedCtx;   // den lærred der tegnes på lige nu (hoved- eller mellemlager)
 const zoomtekst = document.getElementById('zoomtekst');
 const nulstilKnap = document.getElementById('nulstil');
 const knapFortryd = document.getElementById('knapFortryd');
@@ -25,6 +26,7 @@ const menuKnap = document.getElementById('menuKnap');
 const trykGlider = document.getElementById('trykfoelsomhed');
 const trykTal = document.getElementById('trykTal');
 const farveKnap = document.getElementById('farveKnap');
+const blandKnap = document.getElementById('blandKnap');
 const farveProeve = document.getElementById('farveProeve');
 const farveHex = document.getElementById('farveHex');
 const farvePanel = document.getElementById('farvePanel');
@@ -107,6 +109,12 @@ let gemteFarver = [];
 let farvePanelAaben = false;
 let hjulTrukket = false;
 let sidstePensel = 'spids';             // pipetten vender tilbage til denne pensel
+let blandFarver = false;                // til: overlap blander/mørkner farver. fra: ny streg dækker det under
+
+// Mellemlager: alt undtagen den streg, der tegnes lige nu, så der kun skal tegnes én streg pr. billede
+let baseCanvas = null, baseCtx = null, baseGyldig = false, baseKamera = null;
+let forrigeKamera = null, sidsteBevaegelse = 0, previewVentende = false;
+let fuldTid = 0;                        // gennemsnitlig tid (ms) for at tegne hele lærredet
 
 // Gem små indstillinger på enheden (kun menuens tilstand og trykfølsomhed)
 const INDST_NOEGLE = 'tegneapp.indstillinger';
@@ -116,11 +124,12 @@ function hentIndstillinger() {
     if (typeof o.menuAaben === 'boolean') menuAaben = o.menuAaben;
     if (typeof o.trykFuld === 'number' && o.trykFuld >= 0.2 && o.trykFuld <= 1) trykFuld = o.trykFuld;
     if (erHex(o.farve)) farve = o.farve.toLowerCase();
+    if (typeof o.blandFarver === 'boolean') blandFarver = o.blandFarver;
     if (Array.isArray(o.gemte)) gemteFarver = o.gemte.filter(erHex).map(h => h.toLowerCase()).slice(0, MAX_GEMTE);
   } catch (e) { /* ingen gemte indstillinger */ }
 }
 function gemIndstillinger() {
-  try { localStorage.setItem(INDST_NOEGLE, JSON.stringify({ menuAaben, trykFuld, farve, gemte: gemteFarver })); } catch (e) { /* ignorer */ }
+  try { localStorage.setItem(INDST_NOEGLE, JSON.stringify({ menuAaben, trykFuld, farve, blandFarver, gemte: gemteFarver })); } catch (e) { /* ignorer */ }
 }
 hentIndstillinger();
 if (!gemteFarver.length) gemteFarver = STANDARD_FARVER.slice();
@@ -131,6 +140,11 @@ function trykKurve(raa) {
   return Math.pow(x, 0.85);
 }
 function mellem(par, t) { return par[0] + (par[1] - par[0]) * t; }
+// Farven som blæk med styrke a ville se ud på hvidt papir, som fuldt dækkende farve
+function inkPaaHvid(rgb, a) {
+  const t = Math.min(1, Math.max(0, a));
+  return 'rgb(' + Math.round(255 - (255 - rgb[0]) * t) + ',' + Math.round(255 - (255 - rgb[1]) * t) + ',' + Math.round(255 - (255 - rgb[2]) * t) + ')';
+}
 
 function skaler() {
   dpr = window.devicePixelRatio || 1;
@@ -138,6 +152,7 @@ function skaler() {
   hoejde = window.innerHeight;
   laerred.width = Math.round(bredde * dpr);
   laerred.height = Math.round(hoejde * dpr);
+  baseGyldig = false;
   snavs = true;
 }
 
@@ -289,6 +304,9 @@ function opdaterKnapper() {
   menuKnap.textContent = menuAaben ? '✕ Luk menu' : '☰ Menu';
   trykGlider.value = String(Math.round(trykFuld * 100));
   trykTal.textContent = Math.round(trykFuld * 100) + ' %';
+  blandKnap.classList.toggle('valgt', blandFarver);
+  blandKnap.setAttribute('aria-pressed', blandFarver ? 'true' : 'false');
+  blandKnap.textContent = 'Bland farver ved overlap: ' + (blandFarver ? 'TIL' : 'FRA');
   opdaterFarveUI();
 }
 
@@ -324,10 +342,30 @@ function skubHandling(h) {
 function afslutStreg() {
   if (tegnerNu && tegnerNode) {
     const i = tegnerNode.strokes.lastIndexOf(tegnerNu);
-    if (i >= 0) skubHandling({ type: 'tilfoej', node: tegnerNode, stroke: tegnerNu, index: i });
+    if (i >= 0) {
+      skubHandling({ type: 'tilfoej', node: tegnerNode, stroke: tegnerNu, index: i });
+      flettIMellemlager(tegnerNu, tegnerNode);
+    }
   }
   tegnerNu = null;
   tegnerNode = null;
+}
+
+// Den færdige streg lægges oven på mellemlageret, så alt ikke skal tegnes forfra
+function flettIMellemlager(streg, node) {
+  if (!baseGyldig || !baseKamera || node !== kamera.node ||
+      baseKamera.node !== kamera.node || baseKamera.x !== kamera.x ||
+      baseKamera.y !== kamera.y || baseKamera.zoom !== kamera.zoom) {
+    baseGyldig = false;
+    return;
+  }
+  const gammel = ctx;
+  ctx = baseCtx;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  tegnStreg(streg, kamera.zoom, kamera.x, 0, kamera.y, 0, bredde / 2, hoejde / 2);
+  ctx = gammel;
 }
 
 function afslutSlet() {
@@ -351,6 +389,7 @@ function fortryd() {
     }
   }
   gentagStak.push(h);
+  baseGyldig = false;
   snavs = true;
   opdaterKnapper();
 }
@@ -369,6 +408,7 @@ function gentag() {
     }
   }
   fortrydStak.push(h);
+  baseGyldig = false;
   snavs = true;
   opdaterKnapper();
 }
@@ -731,30 +771,74 @@ function tegnTrykLag(s, z, kxh, kxl, kyh, kyl, cx, cy) {
   ctx.restore();
 }
 
-function tegnStreg(s, z, kxh, kxl, kyh, kyl, cx, cy) {
+// Streg med trykfølsom styrke uden blanding: hvert stykke tegnes som en fuldt dækkende farve,
+// der svarer til stregen på hvidt papir. Så bliver overlap ikke mørkere.
+function tegnTrykOpak(s, z, kxh, kxl, kyh, kyl, cx, cy) {
   const pensel = PENSLER[s.t] || PENSLER.spids;
-  if (s.t === 'visk') {
-    ctx.strokeStyle = '#ffffff';
-    ctx.fillStyle = '#ffffff';
-    ctx.globalAlpha = 1;
-    tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, false);
+  const rgb = hexTilRgb(s.c || '#000000');
+  const xmin = cx - GRAENSE, xmax = cx + GRAENSE;
+  const ymin = cy - GRAENSE, ymax = cy + GRAENSE;
+  const maxB = Math.min(s.w * z, MAX_LINJEBREDDE);
+  const n = udtynPunkter(s, z, kxh, kxl, kyh, kyl, cx, cy);
+  const lag = pensel.blod ? BLOD_LAG : [[1, pensel.alpha]];
+  ctx.globalAlpha = 1;
+  if (n === 1) {
+    if (!(bufX[0] > xmin && bufX[0] < xmax && bufY[0] > ymin && bufY[0] < ymax)) return;
+    for (const [b, a] of lag) {
+      ctx.fillStyle = inkPaaHvid(rgb, a * mellem(pensel.styrke, bufT[0]));
+      ctx.beginPath();
+      ctx.arc(bufX[0], bufY[0], Math.max(maxB * mellem(pensel.bredde, bufT[0]) * b, 0.3) / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
     return;
   }
-  ctx.strokeStyle = s.c || '#000000';
-  ctx.fillStyle = ctx.strokeStyle;
+  for (const [b, a] of lag) {            // yderste lag først, så de stærkeste ligger øverst
+    for (let k = 1; k < n; k++) {
+      const kl = klip(bufX[k - 1], bufY[k - 1], bufX[k], bufY[k], xmin, xmax, ymin, ymax);
+      if (!kl) continue;
+      const t = (bufT[k - 1] + bufT[k]) / 2;
+      ctx.strokeStyle = inkPaaHvid(rgb, (pensel.blod ? a : pensel.alpha) * mellem(pensel.styrke, t));
+      ctx.lineWidth = Math.max(maxB * mellem(pensel.bredde, t) * b, 0.3);
+      ctx.beginPath();
+      ctx.moveTo(kl[0], kl[1]);
+      ctx.lineTo(kl[2], kl[3]);
+      ctx.stroke();
+    }
+  }
+}
+
+function tegnStreg(s, z, kxh, kxl, kyh, kyl, cx, cy) {
+  const pensel = PENSLER[s.t] || PENSLER.spids;
+  const c = s.c || '#000000';
+  if (s.t === 'visk') {
+    tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, [[1, '#ffffff', 1]]);
+    return;
+  }
   if (s.pr && s.t === 'fyldepen') {
+    ctx.strokeStyle = c;
+    ctx.fillStyle = c;
     ctx.globalAlpha = 1;
     tegnTryk(s, z, kxh, kxl, kyh, kyl, cx, cy);
   } else if (s.pr) {
-    tegnTrykLag(s, z, kxh, kxl, kyh, kyl, cx, cy);
+    ctx.globalAlpha = 1;
+    if (s.m) tegnTrykLag(s, z, kxh, kxl, kyh, kyl, cx, cy);
+    else tegnTrykOpak(s, z, kxh, kxl, kyh, kyl, cx, cy);
   } else {
-    ctx.globalAlpha = pensel.alpha;
-    tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, pensel.blod);
+    // Lag: [bredde-andel, farve, gennemsigtighed]. Med blanding bruges gennemsigtighed,
+    // uden blanding bruges den tilsvarende fuldt dækkende farve.
+    let lag;
+    if (s.m) {
+      lag = pensel.blod ? BLOD_LAG.map(([b, a]) => [b, c, a]) : [[1, c, pensel.alpha]];
+    } else {
+      const rgb = hexTilRgb(c);
+      lag = pensel.blod ? BLOD_LAG.map(([b, a]) => [b, inkPaaHvid(rgb, a), 1]) : [[1, inkPaaHvid(rgb, pensel.alpha), 1]];
+    }
+    tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, lag);
   }
   ctx.globalAlpha = 1;
 }
 
-function tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, blod) {
+function tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, lag) {
   const p = s.p;
   const xmin = cx - GRAENSE, xmax = cx + GRAENSE;
   const ymin = cy - GRAENSE, ymax = cy + GRAENSE;
@@ -780,17 +864,17 @@ function tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, blod) {
   }
 
   const linjeB = Math.min(Math.max(s.w * z, 0.3), MAX_LINJEBREDDE);
-  const lag = blod ? BLOD_LAG : [[1, ctx.globalAlpha]];
-  const baseAlpha = blod ? 1 : 0;
 
   if (n === 1) {
     if (!indenfor(bufX[0], bufY[0])) return;
-    for (const [b, a] of lag) {
-      if (blod) ctx.globalAlpha = a;
+    for (const [b, stil, a] of lag) {
+      ctx.fillStyle = stil;
+      ctx.globalAlpha = a;
       ctx.beginPath();
       ctx.arc(bufX[0], bufY[0], Math.max(linjeB * b, 0.3) / 2, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
     return;
   }
 
@@ -823,45 +907,129 @@ function tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, blod) {
     }
     ax = bx; ay = by;
   }
-  for (const [b, a] of lag) {
+  for (const [b, stil, a] of lag) {
+    ctx.strokeStyle = stil;
+    ctx.globalAlpha = a;
     ctx.lineWidth = Math.max(linjeB * b, 0.3);
-    if (blod) ctx.globalAlpha = a;
     ctx.stroke();
   }
-  if (baseAlpha) ctx.globalAlpha = 1;
+  ctx.globalAlpha = 1;
 }
 
-function tegn() {
-  snavs = false;
+// ---------- mellemlager og tegning af hele billedet ----------
+
+function sikrBase() {
+  if (!baseCanvas || baseCanvas.width !== laerred.width || baseCanvas.height !== laerred.height) {
+    baseCanvas = document.createElement('canvas');
+    baseCanvas.width = laerred.width;
+    baseCanvas.height = laerred.height;
+    baseCtx = baseCanvas.getContext('2d');
+    baseGyldig = false;
+  }
+}
+
+function kameraLigBase() {
+  return !!baseKamera && baseKamera.node === kamera.node && baseKamera.x === kamera.x &&
+         baseKamera.y === kamera.y && baseKamera.zoom === kamera.zoom;
+}
+
+// Tegn alle synlige streger (undtagen den, der tegnes lige nu) på mellemlageret,
+// i den rækkefølge de blev lavet, så viskelæderet fjerner præcis det, der lå under det.
+function tegnAltTilBase() {
+  const t0 = performance.now();
+  const gammel = ctx;
+  ctx = baseCtx;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, bredde, hoejde);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // Saml alle synlige streger og tegn dem i den rækkefølge, de blev lavet.
-  // Så fjerner viskelæderet præcis det, der lå under det, uanset niveau.
+  const udenStreg = tegnerNu;
   const liste = [];
   gennemloebAlt((node, s, z, kxh, kxl, kyh, kyl, cx, cy) => {
-    liste.push({ s, z, kxh, kxl, kyh, kyl, cx, cy });
+    if (s !== udenStreg) liste.push({ s, z, kxh, kxl, kyh, kyl, cx, cy });
   });
   liste.sort((a, b) => a.s.id - b.s.id);
   for (const k of liste) tegnStreg(k.s, k.z, k.kxh, k.kxl, k.kyh, k.kyl, k.cx, k.cy);
+  ctx = gammel;
+
   tegnet = liste.length;
+  baseGyldig = true;
+  baseKamera = { node: kamera.node, x: kamera.x, y: kamera.y, zoom: kamera.zoom };
+  fuldTid = fuldTid * 0.6 + (performance.now() - t0) * 0.4;
+}
+
+function tegn() {
+  snavs = false;
+  const nu = performance.now();
+  sikrBase();
+
+  if (!forrigeKamera || forrigeKamera.node !== kamera.node || forrigeKamera.x !== kamera.x ||
+      forrigeKamera.y !== kamera.y || forrigeKamera.zoom !== kamera.zoom) {
+    sidsteBevaegelse = nu;
+    forrigeKamera = { node: kamera.node, x: kamera.x, y: kamera.y, zoom: kamera.zoom };
+  }
+
+  // På langsomme enheder vises under pan/zoom det gamle billede flyttet/forstørret (hurtigt),
+  // og først når bevægelsen stopper, tegnes alt skarpt igen.
+  let preview = false;
+  if (!baseGyldig) {
+    tegnAltTilBase();
+  } else if (!kameraLigBase()) {
+    if (fuldTid > 12 && !tegnerNu && baseKamera.node === kamera.node && nu - sidsteBevaegelse < 150) {
+      preview = true;
+    } else {
+      tegnAltTilBase();
+    }
+  }
+
+  const c0 = bredde / 2, c1 = hoejde / 2;
+  hovedCtx.setTransform(1, 0, 0, 1, 0, 0);
+  hovedCtx.globalCompositeOperation = 'source-over';
+  hovedCtx.globalAlpha = 1;
+  if (preview) {
+    const k = kamera.zoom / baseKamera.zoom;
+    const ox = (baseKamera.x - kamera.x) * kamera.zoom;
+    const oy = (baseKamera.y - kamera.y) * kamera.zoom;
+    hovedCtx.fillStyle = '#ffffff';
+    hovedCtx.fillRect(0, 0, laerred.width, laerred.height);
+    hovedCtx.setTransform(dpr * k, 0, 0, dpr * k, dpr * (c0 * (1 - k) + ox), dpr * (c1 * (1 - k) + oy));
+    hovedCtx.drawImage(baseCanvas, 0, 0, baseCanvas.width, baseCanvas.height, 0, 0, bredde, hoejde);
+    previewVentende = true;
+  } else {
+    hovedCtx.drawImage(baseCanvas, 0, 0);
+  }
+
+  hovedCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  hovedCtx.lineCap = 'round';
+  hovedCtx.lineJoin = 'round';
+
+  // Den streg, der tegnes lige nu, tegnes oven på
+  if (!preview && tegnerNu && tegnerNode === kamera.node) {
+    const gammel = ctx;
+    ctx = hovedCtx;
+    tegnStreg(tegnerNu, kamera.zoom, kamera.x, 0, kamera.y, 0, c0, c1);
+    ctx = gammel;
+  }
 
   // Viskelæderets cirkel
   if (erViskeVaerktoej(vaerktoej) && musX >= 0) {
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#777777';
-    ctx.beginPath();
-    ctx.arc(musX, musY, STOERRELSE[vaerktoej] / 2, 0, Math.PI * 2);
-    ctx.stroke();
+    hovedCtx.globalAlpha = 1;
+    hovedCtx.lineWidth = 1.5;
+    hovedCtx.strokeStyle = '#777777';
+    hovedCtx.beginPath();
+    hovedCtx.arc(musX, musY, STOERRELSE[vaerktoej] / 2, 0, Math.PI * 2);
+    hovedCtx.stroke();
   }
 
   if (visFejlsoeg) {
     const linjer = ['kamera: x=' + kamera.x.toExponential(3) + ' y=' + kamera.y.toExponential(3) +
       ' zoom=' + kamera.zoom.toPrecision(4),
-      'historik: ' + fortrydStak.length + ' fortryd, ' + gentagStak.length + ' gentag'];
+      'historik: ' + fortrydStak.length + ' fortryd, ' + gentagStak.length + ' gentag',
+      'fuld tegning: ' + fuldTid.toFixed(1) + ' ms' + (preview ? ' (viser forhåndsvisning)' : '')];
     let m = kamera.node, d = 0;
     while (m && d < 8) {
       linjer.push('niveau ' + m.niveau + ': ' + m.strokes.length + ' streger, ' + m.children.length +
@@ -875,6 +1043,10 @@ function tegn() {
 }
 
 function loop() {
+  if (previewVentende && performance.now() - sidsteBevaegelse >= 150) {
+    previewVentende = false;
+    snavs = true;
+  }
   if (snavs) tegn();
   requestAnimationFrame(loop);
 }
@@ -917,7 +1089,7 @@ function sletStregVed(px, py) {
     antalStreger--;
     sletItems.push({ node, stroke: s, index: i });
   }
-  if (ramt.length) snavs = true;
+  if (ramt.length) { baseGyldig = false; snavs = true; }
 }
 
 // ---------- tegning med pen/finger ----------
@@ -955,6 +1127,7 @@ function startStreg(sx, sy, tryk, type) {
     id: naesteId++,
     t: type,
     c: type === 'visk' ? null : farve,
+    m: blandFarver,
     p: [wx, wy],
     pr: brugTryk ? [medStylus ? trykKurve(tryk) : 0.6] : null,
     w: px / kamera.zoom,
@@ -1126,6 +1299,11 @@ stoerrelseGlider.addEventListener('input', () => {
   saetStoerrelse(mn * Math.pow(mx / mn, Number(stoerrelseGlider.value) / 100));
 });
 
+blandKnap.addEventListener('click', () => {
+  blandFarver = !blandFarver;
+  gemIndstillinger();
+  opdaterKnapper();
+});
 farveKnap.addEventListener('click', () => {
   farvePanelAaben = !farvePanelAaben;
   opdaterFarveUI();
@@ -1179,6 +1357,10 @@ window.addEventListener('keydown', e => {
       vaelgVaerktoej('spids');
     } else if (k === 'i') {
       vaelgVaerktoej('pipette');
+    } else if (k === 'b') {
+      blandFarver = !blandFarver;
+      gemIndstillinger();
+      opdaterKnapper();
     } else if (k === '[') {
       saetStoerrelse(STOERRELSE[vaerktoej] / 1.25);
     } else if (k === ']') {
