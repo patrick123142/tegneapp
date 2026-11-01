@@ -1,0 +1,93 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  font-family: system-ui, sans-serif;
+  overscroll-behavior: none;
+}
+#laerred {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#hud, #menu {
+  position: fixed;
+  font-size: 14px;
+  color: #222;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#hud {
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+}
+#menu {
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-height: calc(100vh - 24px);
+  z-index: 5;
+}
+#menuIndhold {
+  width: 220px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+}
+#menu.lukket #menuIndhold { display: none; }
+.gruppe { display: flex; flex-direction: column; gap: 6px; }
+.titel { font-weight: 600; font-size: 13px; color: #555; }
+.titel span { font-weight: 400; color: #222; }
+.raekke { display: flex; gap: 6px; }
+.raekke button { flex: 1; }
+#hud button, #menu button {
+  font: inherit;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid #999;
+  border-radius: 6px;
+  background: #f4f4f4;
+  color: #222;
+  text-align: left;
+}
+#menu #menuKnap {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: #bbb;
+}
+.raekke button { text-align: center; }
+#hud button:active, #menu button:active { background: #e0e0e0; }
+#menu button.valgt { background: #222; color: #fff; border-color: #222; }
+#menu button:disabled { opacity: 0.4; }
+#menu input[type="range"] { width: 100%; height: 32px; margin: 0; }
+
+.skjult { display: none; }
+#farvePanel { display: flex; flex-direction: column; gap: 6px; }
+#farvePanel.skjult { display: none; }
+#farvehjul { display: block; width: 196px; height: 196px; align-self: center; touch-action: none; }
+#farveKnap { display: flex; align-items: center; gap: 8px; }
+.proeve { display: inline-block; width: 24px; height: 24px; border: 1px solid #666; border-radius: 4px; background: #000; }
+.farvenet { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+#menu .farvenet button { min-height: 34px; height: 34px; padding: 0; border: 2px solid #999; border-radius: 6px; }
+#menu .farvenet button.valgt { border-color: #222; outline: 2px solid #222; outline-offset: 1px; }
