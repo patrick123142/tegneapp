@@ -5,13 +5,16 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Uendeligt lærred</title>
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 <canvas id="laerred"></canvas>
 <div id="menu">
   <button id="menuKnap" type="button" aria-expanded="true">☰ Menu</button>
   <div id="menuIndhold">
+    <div class="gruppe">
+      <button id="knapGalleri" type="button">← Galleri (gem og luk)</button>
+    </div>
     <div class="gruppe">
       <div class="titel">Pensler</div>
       <button type="button" data-v="spids">Spids blyant</button>
@@ -72,9 +75,29 @@
   </div>
 </div>
 <div id="hud">
+  <span id="gemStatus"></span>
   <span id="zoomtekst">Zoom 1×</span>
   <button id="nulstil" type="button">Nulstil visning</button>
 </div>
-<script src="app.js?v=8"></script>
+<div id="galleri" class="galleri">
+  <div class="galleriTop">
+    <h1>Mine lærreder</h1>
+    <button id="nytLaerredKnap" type="button">+ Nyt lærred</button>
+  </div>
+  <div id="galleriBesked" class="galleriBesked">Henter dine lærreder…</div>
+  <div id="galleriGitter" class="galleriGitter"></div>
+</div>
+<div id="dialog" class="dialog skjult">
+  <div class="dialogBoks">
+    <div id="dialogTitel" class="dialogTitel"></div>
+    <div id="dialogTekst" class="note"></div>
+    <input id="dialogInput" type="text" maxlength="80" autocomplete="off">
+    <div class="raekke">
+      <button id="dialogAnnuller" type="button">Annuller</button>
+      <button id="dialogOk" type="button">OK</button>
+    </div>
+  </div>
+</div>
+<script src="app.js?v=9"></script>
 </body>
 </html>
