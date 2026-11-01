@@ -5,7 +5,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Uendeligt lærred</title>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <canvas id="laerred"></canvas>
@@ -20,21 +20,42 @@
       <button type="button" data-v="tusse">Tusse</button>
     </div>
     <div class="gruppe">
-      <div class="titel">Farve</div>
-      <button id="farveKnap" type="button"><span id="farveProeve" class="proeve"></span><span id="farveHex">#000000</span></button>
+      <div class="titel">Farve <span id="farveProeve" class="proeve"></span> <span id="farveHex">#000000</span></div>
+      <div id="gemteFarver" class="farvenet"></div>
+      <div class="raekke">
+        <button id="farveKnap" type="button">Farvehjul</button>
+        <button type="button" data-v="pipette">Pipette</button>
+      </div>
       <div id="farvePanel" class="skjult">
         <canvas id="farvehjul" width="196" height="196"></canvas>
-        <div class="titel">Lysstyrke</div>
-        <input id="lysstyrke" type="range" min="0" max="100" step="1" value="0">
+        <div class="titel">Lys / mørk</div>
+        <input id="lysstyrke" type="range" min="0" max="100" step="1" value="100">
         <div class="raekke">
           <button id="gemFarve" type="button">Gem farve</button>
-          <button id="fjernFarve" type="button">Fjern</button>
+          <button id="fjernFarve" type="button">Fjern gemt</button>
         </div>
-        <div class="titel">Gemte farver</div>
-        <div id="gemteFarver" class="farvenet"></div>
       </div>
-      <button type="button" data-v="pipette">Pipette (tag farve fra tegning)</button>
       <button id="blandKnap" type="button" aria-pressed="false">Bland farver ved overlap: FRA</button>
+    </div>
+    <div class="gruppe">
+      <div class="titel">Størrelse <span id="stoerrelseTal">3 px</span></div>
+      <input id="stoerrelse" type="range" min="0" max="100" step="1" value="50">
+    </div>
+    <div class="gruppe">
+      <div class="titel">Tryk og styrke</div>
+      <button id="trykKnap" type="button" aria-pressed="true">Tryk fra stylus: TIL</button>
+      <div id="trykDel" class="gruppe">
+        <div class="titel">Fuld styrke ved <span id="trykTal">55 %</span> tryk</div>
+        <input id="trykfoelsomhed" type="range" min="5" max="100" step="1" value="55">
+        <div id="trykMaaling" class="note">Tegn med stylus for at måle dit tryk</div>
+        <div class="raekke">
+          <button id="brugHoejeste" type="button">Brug mit tryk</button>
+          <button id="nulstilMaaling" type="button">Mål igen</button>
+        </div>
+      </div>
+      <div class="titel">Fast styrke <span id="styrkeTal">100 %</span></div>
+      <input id="styrke" type="range" min="5" max="100" step="1" value="100">
+      <div class="note">Bruges af mus, finger og når tryk er slået fra.</div>
     </div>
     <div class="gruppe">
       <div class="titel">Viskelæder</div>
@@ -48,20 +69,12 @@
         <button id="knapGentag" type="button">Gentag</button>
       </div>
     </div>
-    <div class="gruppe">
-      <div class="titel">Størrelse <span id="stoerrelseTal">3 px</span></div>
-      <input id="stoerrelse" type="range" min="0" max="100" step="1" value="50">
-    </div>
-    <div class="gruppe">
-      <div class="titel">Fuld styrke ved <span id="trykTal">55 %</span> tryk</div>
-      <input id="trykfoelsomhed" type="range" min="20" max="100" step="1" value="55">
-    </div>
   </div>
 </div>
 <div id="hud">
   <span id="zoomtekst">Zoom 1×</span>
   <button id="nulstil" type="button">Nulstil visning</button>
 </div>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

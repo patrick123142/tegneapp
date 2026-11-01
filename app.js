@@ -9,7 +9,7 @@
 // Viskelæderet ("visk") er en hvid streg, der tegnes i samme rækkefølge som alt andet
 // (efter tidspunkt). Den fjerner altså præcis det, den rører, uanset zoom og niveau,
 // og kan fortrydes. "Slet streg" fjerner derimod hele streger.
-const VERSION = 5; // bid 5: farver. Rettelse 2: valgfri farveblanding og hurtigere tegning (mellemlager)
+const VERSION = 5; // bid 5: farver. Rettelse 3: enkel farvemenu, tryk til/fra, fast styrke, følsomhed (måling)
 
 const laerred = document.getElementById('laerred');
 const hovedCtx = laerred.getContext('2d');
@@ -27,6 +27,13 @@ const trykGlider = document.getElementById('trykfoelsomhed');
 const trykTal = document.getElementById('trykTal');
 const farveKnap = document.getElementById('farveKnap');
 const blandKnap = document.getElementById('blandKnap');
+const trykKnap = document.getElementById('trykKnap');
+const trykDel = document.getElementById('trykDel');
+const trykMaaling = document.getElementById('trykMaaling');
+const brugHoejesteKnap = document.getElementById('brugHoejeste');
+const nulstilMaalingKnap = document.getElementById('nulstilMaaling');
+const styrkeGlider = document.getElementById('styrke');
+const styrkeTal = document.getElementById('styrkeTal');
 const farveProeve = document.getElementById('farveProeve');
 const farveHex = document.getElementById('farveHex');
 const farvePanel = document.getElementById('farvePanel');
@@ -110,6 +117,9 @@ let farvePanelAaben = false;
 let hjulTrukket = false;
 let sidstePensel = 'spids';             // pipetten vender tilbage til denne pensel
 let blandFarver = false;                // til: overlap blander/mørkner farver. fra: ny streg dækker det under
+let trykTil = true;                     // stylussens tryk styrer styrken (fra: fast styrke)
+let fastStyrke = 1;                     // fast styrke (0,05-1) for mus, finger og når tryk er fra
+let hoejesteTryk = 0;                   // højeste rå tryk målt fra stylus (til kalibrering)
 
 // Mellemlager: alt undtagen den streg, der tegnes lige nu, så der kun skal tegnes én streg pr. billede
 let baseCanvas = null, baseCtx = null, baseGyldig = false, baseKamera = null;
@@ -122,14 +132,16 @@ function hentIndstillinger() {
   try {
     const o = JSON.parse(localStorage.getItem(INDST_NOEGLE) || '{}');
     if (typeof o.menuAaben === 'boolean') menuAaben = o.menuAaben;
-    if (typeof o.trykFuld === 'number' && o.trykFuld >= 0.2 && o.trykFuld <= 1) trykFuld = o.trykFuld;
+    if (typeof o.trykFuld === 'number' && o.trykFuld >= 0.05 && o.trykFuld <= 1) trykFuld = o.trykFuld;
+    if (typeof o.trykTil === 'boolean') trykTil = o.trykTil;
+    if (typeof o.fastStyrke === 'number' && o.fastStyrke >= 0.05 && o.fastStyrke <= 1) fastStyrke = o.fastStyrke;
     if (erHex(o.farve)) farve = o.farve.toLowerCase();
     if (typeof o.blandFarver === 'boolean') blandFarver = o.blandFarver;
     if (Array.isArray(o.gemte)) gemteFarver = o.gemte.filter(erHex).map(h => h.toLowerCase()).slice(0, MAX_GEMTE);
   } catch (e) { /* ingen gemte indstillinger */ }
 }
 function gemIndstillinger() {
-  try { localStorage.setItem(INDST_NOEGLE, JSON.stringify({ menuAaben, trykFuld, farve, blandFarver, gemte: gemteFarver })); } catch (e) { /* ignorer */ }
+  try { localStorage.setItem(INDST_NOEGLE, JSON.stringify({ menuAaben, trykFuld, trykTil, fastStyrke, farve, blandFarver, gemte: gemteFarver })); } catch (e) { /* ignorer */ }
 }
 hentIndstillinger();
 if (!gemteFarver.length) gemteFarver = STANDARD_FARVER.slice();
@@ -205,7 +217,7 @@ function tegnFarvehjul() {
       const dx = x + 0.5 - W / 2, dy = y + 0.5 - W / 2, d = Math.hypot(dx, dy);
       if (d > R + 1) continue;
       const h = (Math.atan2(dy, dx) / (2 * Math.PI) + 1) % 1;
-      const c = hsvTilRgb(h, Math.min(1, d / R), farveV);
+      const c = hsvTilRgb(h, Math.min(1, d / R), 1);
       const k = (y * W + x) * 4;
       px[k] = c[0]; px[k + 1] = c[1]; px[k + 2] = c[2];
       px[k + 3] = d > R ? Math.round(255 * (1 - (d - R))) : 255;
@@ -220,9 +232,11 @@ function tegnFarvehjul() {
   hjulCtx.beginPath(); hjulCtx.arc(mx, my, 8.5, 0, 2 * Math.PI); hjulCtx.stroke();
 }
 
+// Farverækken er altid synlig. Sort ligger altid først (og kan ikke fjernes).
 function tegnGemteFarver() {
   while (gemteFarverEl.firstChild) gemteFarverEl.removeChild(gemteFarverEl.firstChild);
-  for (const h of gemteFarver) {
+  const liste = ['#000000'].concat(gemteFarver.filter(h => h !== '#000000'));
+  for (const h of liste) {
     const b = document.createElement('button');
     b.type = 'button';
     b.title = h;
@@ -239,7 +253,9 @@ function opdaterFarveUI() {
   farveHex.textContent = farve;
   lysstyrkeGlider.value = String(Math.round(farveV * 100));
   farvePanel.classList.toggle('skjult', !farvePanelAaben);
-  if (farvePanelAaben) { tegnFarvehjul(); tegnGemteFarver(); }
+  farveKnap.textContent = farvePanelAaben ? 'Skjul hjul' : 'Farvehjul';
+  tegnGemteFarver();
+  if (farvePanelAaben) tegnFarvehjul();
 }
 
 // Vælg en farve ud fra en hex-værdi (fra gemte farver, pipette osv.)
@@ -257,6 +273,7 @@ function saetFarve(hex) {
 // Vælg farve ud fra et punkt på farvehjulet (farvetone + mætning), med nuværende lysstyrke
 function saetFraHjul(h, s) {
   farveH = h; farveS = s;
+  if (farveV < 0.15) farveV = 1;   // et tryk på hjulet giver en tydelig farve
   const c = hsvTilRgb(h, s, farveV);
   farve = rgbTilHex(c[0], c[1], c[2]);
   gemIndstillinger();
@@ -304,6 +321,12 @@ function opdaterKnapper() {
   menuKnap.textContent = menuAaben ? '✕ Luk menu' : '☰ Menu';
   trykGlider.value = String(Math.round(trykFuld * 100));
   trykTal.textContent = Math.round(trykFuld * 100) + ' %';
+  trykKnap.classList.toggle('valgt', trykTil);
+  trykKnap.setAttribute('aria-pressed', trykTil ? 'true' : 'false');
+  trykKnap.textContent = 'Tryk fra stylus: ' + (trykTil ? 'TIL' : 'FRA');
+  trykDel.classList.toggle('skjult', !trykTil);
+  styrkeGlider.value = String(Math.round(fastStyrke * 100));
+  styrkeTal.textContent = Math.round(fastStyrke * 100) + ' %';
   blandKnap.classList.toggle('valgt', blandFarver);
   blandKnap.setAttribute('aria-pressed', blandFarver ? 'true' : 'false');
   blandKnap.textContent = 'Bland farver ved overlap: ' + (blandFarver ? 'TIL' : 'FRA');
@@ -826,12 +849,13 @@ function tegnStreg(s, z, kxh, kxl, kyh, kyl, cx, cy) {
   } else {
     // Lag: [bredde-andel, farve, gennemsigtighed]. Med blanding bruges gennemsigtighed,
     // uden blanding bruges den tilsvarende fuldt dækkende farve.
+    const styrke = typeof s.a === 'number' ? s.a : pensel.alpha;   // fast styrke for denne streg
     let lag;
     if (s.m) {
-      lag = pensel.blod ? BLOD_LAG.map(([b, a]) => [b, c, a]) : [[1, c, pensel.alpha]];
+      lag = pensel.blod ? BLOD_LAG.map(([b, a]) => [b, c, a * styrke]) : [[1, c, styrke]];
     } else {
       const rgb = hexTilRgb(c);
-      lag = pensel.blod ? BLOD_LAG.map(([b, a]) => [b, inkPaaHvid(rgb, a), 1]) : [[1, inkPaaHvid(rgb, pensel.alpha), 1]];
+      lag = pensel.blod ? BLOD_LAG.map(([b, a]) => [b, inkPaaHvid(rgb, a * styrke), 1]) : [[1, inkPaaHvid(rgb, styrke), 1]];
     }
     tegnEnkeltStreg(s, z, kxh, kxl, kyh, kyl, cx, cy, lag);
   }
@@ -1119,8 +1143,8 @@ function startStreg(sx, sy, tryk, type) {
   if (!STOERRELSE[type] || type === 'slet' || type === 'pipette') type = 'spids';
   const [wx, wy] = tilVerden(sx, sy);
   const pensel = PENSLER[type];
-  const medStylus = typeof tryk === 'number' && type !== 'visk';
-  const brugTryk = !!pensel && (medStylus || !!pensel.fart);
+  const medStylus = trykTil && typeof tryk === 'number' && type !== 'visk';
+  const brugTryk = !!pensel && (medStylus || (trykTil && !!pensel.fart));
   const px = STOERRELSE[type] * (type === 'fyldepen' ? 1.5 : 1);   // w = største bredde
   tegnerNode = kamera.node;
   tegnerNu = {
@@ -1128,6 +1152,7 @@ function startStreg(sx, sy, tryk, type) {
     t: type,
     c: type === 'visk' ? null : farve,
     m: blandFarver,
+    a: fastStyrke,
     p: [wx, wy],
     pr: brugTryk ? [medStylus ? trykKurve(tryk) : 0.6] : null,
     w: px / kamera.zoom,
@@ -1174,8 +1199,16 @@ function trykTilPunkt(streg, h) {
   return streg._p;
 }
 
+function registrerTryk(e) {
+  if (e.pointerType === 'pen' && e.pressure > hoejesteTryk + 0.005) {
+    hoejesteTryk = e.pressure;
+    trykMaaling.textContent = 'Højeste tryk målt: ' + Math.round(hoejesteTryk * 100) + ' %';
+  }
+}
+
 laerred.addEventListener('pointerdown', e => {
   e.preventDefault();
+  registrerTryk(e);
   laerred.setPointerCapture(e.pointerId);
 
   if (e.pointerType === 'mouse' && e.button !== 0) {
@@ -1212,6 +1245,7 @@ laerred.addEventListener('pointerdown', e => {
 });
 
 laerred.addEventListener('pointermove', e => {
+  registrerTryk(e);
   if (erViskeVaerktoej(vaerktoej)) { musX = e.clientX; musY = e.clientY; snavs = true; }
 
   if (hoejreTraek && hoejreTraek.id === e.pointerId) {
@@ -1290,7 +1324,7 @@ menuKnap.addEventListener('click', () => {
   opdaterKnapper();
 });
 trykGlider.addEventListener('input', () => {
-  trykFuld = Math.min(1, Math.max(0.2, Number(trykGlider.value) / 100));
+  trykFuld = Math.min(1, Math.max(0.05, Number(trykGlider.value) / 100));
   gemIndstillinger();
   opdaterKnapper();
 });
@@ -1299,6 +1333,26 @@ stoerrelseGlider.addEventListener('input', () => {
   saetStoerrelse(mn * Math.pow(mx / mn, Number(stoerrelseGlider.value) / 100));
 });
 
+trykKnap.addEventListener('click', () => {
+  trykTil = !trykTil;
+  gemIndstillinger();
+  opdaterKnapper();
+});
+styrkeGlider.addEventListener('input', () => {
+  fastStyrke = Math.min(1, Math.max(0.05, Number(styrkeGlider.value) / 100));
+  gemIndstillinger();
+  opdaterKnapper();
+});
+brugHoejesteKnap.addEventListener('click', () => {
+  if (hoejesteTryk <= 0) return;
+  trykFuld = Math.min(1, Math.max(0.05, hoejesteTryk * 0.9));
+  gemIndstillinger();
+  opdaterKnapper();
+});
+nulstilMaalingKnap.addEventListener('click', () => {
+  hoejesteTryk = 0;
+  trykMaaling.textContent = 'Tegn med stylus for at måle dit tryk';
+});
 blandKnap.addEventListener('click', () => {
   blandFarver = !blandFarver;
   gemIndstillinger();

@@ -91,3 +91,8 @@ html, body {
 .farvenet { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 #menu .farvenet button { min-height: 34px; height: 34px; padding: 0; border: 2px solid #999; border-radius: 6px; }
 #menu .farvenet button.valgt { border-color: #222; outline: 2px solid #222; outline-offset: 1px; }
+
+.note { font-size: 12px; color: #666; }
+#trykDel.skjult { display: none; }
+#menu .farvenet button { min-height: 40px; height: 40px; }
+#farveKnap, #menu .raekke button[data-v] { text-align: center; }
