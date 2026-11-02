@@ -1,0 +1,32 @@
+{
+  "name": "Uendeligt lærred",
+  "short_name": "Lærred",
+  "description": "Tegneapp med uendelig zoom, der virker uden internet",
+  "lang": "da",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f3f3f1",
+  "theme_color": "#222222",
+  "icons": [
+    {
+      "src": "icons/ikon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/ikon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/ikon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

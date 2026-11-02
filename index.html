@@ -2,10 +2,14 @@
 <html lang="da">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Uendeligt lærred</title>
-<link rel="stylesheet" href="style.css?v=9">
+<meta name="theme-color" content="#222222">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icons/ikon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-ikon.png">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <canvas id="laerred"></canvas>
@@ -82,10 +86,19 @@
 <div id="galleri" class="galleri">
   <div class="galleriTop">
     <h1>Mine lærreder</h1>
-    <button id="nytLaerredKnap" type="button">+ Nyt lærred</button>
+    <div class="raekke">
+      <button id="installKnap" type="button" class="skjult">Installér app</button>
+      <button id="importKnap" type="button">Åbn fra fil</button>
+      <button id="nytLaerredKnap" type="button">+ Nyt lærred</button>
+    </div>
+    <input id="importInput" type="file" accept=".json,application/json" class="skjult">
   </div>
   <div id="galleriBesked" class="galleriBesked">Henter dine lærreder…</div>
   <div id="galleriGitter" class="galleriGitter"></div>
+</div>
+<div id="opdatering" class="opdatering skjult">
+  <span>En ny version er klar.</span>
+  <button id="opdateringKnap" type="button">Opdater nu</button>
 </div>
 <div id="dialog" class="dialog skjult">
   <div class="dialogBoks">
@@ -98,6 +111,12 @@
     </div>
   </div>
 </div>
-<script src="app.js?v=9"></script>
+<script src="grundlag.js?v=11"></script>
+<script src="kerne.js?v=11"></script>
+<script src="farver.js?v=11"></script>
+<script src="vaerktoej.js?v=11"></script>
+<script src="tegning.js?v=11"></script>
+<script src="lager.js?v=11"></script>
+<script src="start.js?v=11"></script>
 </body>
 </html>
