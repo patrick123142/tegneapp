@@ -2,19 +2,20 @@
 // SERVICE WORKER: gør appen brugbar uden internet.
 // Første gang appen åbnes, hentes alle filer og gemmes på enheden. Derefter bruges de gemte filer.
 // Når der kommer en ny version, skifter VERSION (og filnavnene herunder), og den nye version hentes i baggrunden.
-const VERSION = '11';
+const VERSION = '13';
 const CACHE = 'tegneapp-' + VERSION;
 const FILER = [
   "./",
   "index.html",
-  "style.css?v=11",
-  "grundlag.js?v=11",
-  "kerne.js?v=11",
-  "farver.js?v=11",
-  "vaerktoej.js?v=11",
-  "tegning.js?v=11",
-  "lager.js?v=11",
-  "start.js?v=11",
+  "style.css?v=13",
+  "grundlag.js?v=13",
+  "kerne.js?v=13",
+  "farver.js?v=13",
+  "vaerktoej.js?v=13",
+  "tegning.js?v=13",
+  "fliser.js?v=13",
+  "lager.js?v=13",
+  "start.js?v=13",
   "manifest.json",
   "icons/ikon-192.png",
   "icons/ikon-512.png",

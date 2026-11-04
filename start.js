@@ -157,6 +157,15 @@ nulstilMaalingKnap.addEventListener('click', () => {
   hoejesteTryk = 0;
   trykMaaling.textContent = 'Tegn med stylus for at måle dit tryk';
 });
+fliseKnap.addEventListener('click', () => {
+  brugFliser = !brugFliser;
+  tomAlleFliser();
+  baseGyldig = false;
+  forrigeKamera = null;
+  gemIndstillinger();
+  opdaterKnapper();
+  snavs = true;
+});
 blandKnap.addEventListener('click', () => {
   blandFarver = !blandFarver;
   gemIndstillinger();

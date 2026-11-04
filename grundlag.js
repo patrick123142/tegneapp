@@ -11,7 +11,7 @@
 // Viskelæderet ("visk") er en hvid streg, der tegnes i samme rækkefølge som alt andet
 // (efter tidspunkt). Den fjerner altså præcis det, den rører, uanset zoom og niveau,
 // og kan fortrydes. "Slet streg" fjerner derimod hele streger.
-const VERSION = 7; // bid 7: kode delt i flere filer, eksport/import af lærreder, hurtigere tegning af streger med tryk
+const VERSION = 8; // bid 7: fliser, forenklede streger og trinvist gem
 
 const laerred = document.getElementById('laerred');
 const hovedCtx = laerred.getContext('2d');
@@ -27,6 +27,7 @@ const menu = document.getElementById('menu');
 const menuKnap = document.getElementById('menuKnap');
 const trykGlider = document.getElementById('trykfoelsomhed');
 const trykTal = document.getElementById('trykTal');
+const fliseKnap = document.getElementById('fliseKnap');
 const farveKnap = document.getElementById('farveKnap');
 const blandKnap = document.getElementById('blandKnap');
 const trykKnap = document.getElementById('trykKnap');
@@ -125,6 +126,17 @@ let hoejesteTryk = 0;                   // højeste rå tryk målt fra stylus (t
 
 // Mellemlager: alt undtagen den streg, der tegnes lige nu, så der kun skal tegnes én streg pr. billede
 let baseCanvas = null, baseCtx = null, baseGyldig = false, baseKamera = null;
+
+// Fliser (bid 9): se fliser.js
+const FLISE_PX = 256;                    // en flises størrelse i enhedens pixels
+const FLISE_MIN = -3, FLISE_MAX = 10;    // flise-niveauer svarer til zoom 2^niveau
+const MAX_FLISER = 450;                  // højst så mange flise-billeder i hukommelsen (ca. 115 MB)
+let brugFliser = true;                   // fliser (hurtig) eller den klassiske tegnemetode (reserve)
+let fliseAntal = 0, fliseCanvasAntal = 0, fliseFrame = 0, sidsteFliseMs = 0, fliseMangler = false;
+const fliseNoder = new Set();            // niveauer, der har fliser
+let fliseBassin = [];                    // genbrugte flise-billeder
+let kompA = null, kompB = null, kompNyt = null, kompSenest = null, kompKamera = null, forrigeBevKamera = null;
+let maalB = 0, maalH = 0;                // størrelse (css-pixels) på det område, der tegnes på lige nu
 let forrigeKamera = null, sidsteBevaegelse = 0, previewVentende = false;
 let fuldTid = 0;                        // gennemsnitlig tid (ms) for at tegne hele lærredet
 

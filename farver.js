@@ -12,11 +12,12 @@ function hentIndstillinger() {
     if (typeof o.fastStyrke === 'number' && o.fastStyrke >= 0.05 && o.fastStyrke <= 1) fastStyrke = o.fastStyrke;
     if (erHex(o.farve)) farve = o.farve.toLowerCase();
     if (typeof o.blandFarver === 'boolean') blandFarver = o.blandFarver;
+    if (typeof o.brugFliser === 'boolean') brugFliser = o.brugFliser;
     if (Array.isArray(o.gemte)) gemteFarver = o.gemte.filter(erHex).map(h => h.toLowerCase()).slice(0, MAX_GEMTE);
   } catch (e) { /* ingen gemte indstillinger */ }
 }
 function gemIndstillinger() {
-  try { localStorage.setItem(INDST_NOEGLE, JSON.stringify({ menuAaben, trykFuld, trykTil, fastStyrke, farve, blandFarver, gemte: gemteFarver })); } catch (e) { /* ignorer */ }
+  try { localStorage.setItem(INDST_NOEGLE, JSON.stringify({ menuAaben, trykFuld, trykTil, fastStyrke, farve, blandFarver, brugFliser, gemte: gemteFarver })); } catch (e) { /* ignorer */ }
 }
 
 function trykKurve(raa) {

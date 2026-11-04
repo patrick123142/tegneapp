@@ -141,7 +141,7 @@ function tegnTrykLag(s, z, kxh, kxl, kyh, kyl, cx, cy) {
   }
   const pad = maxB / 2 + 2;
   x0 = Math.max(0, Math.floor(x0 - pad)); y0 = Math.max(0, Math.floor(y0 - pad));
-  x1 = Math.min(bredde, Math.ceil(x1 + pad)); y1 = Math.min(hoejde, Math.ceil(y1 + pad));
+  x1 = Math.min(maalB, Math.ceil(x1 + pad)); y1 = Math.min(maalH, Math.ceil(y1 + pad));
   if (x1 <= x0 || y1 <= y0) return;
 
   sikrLag();
@@ -379,7 +379,7 @@ function tegnAltTilBase() {
   fuldTid = fuldTid * 0.6 + (performance.now() - t0) * 0.4;
 }
 
-function tegn() {
+function tegnKlassisk() {
   snavs = false;
   const nu = performance.now();
   sikrBase();
@@ -460,11 +460,11 @@ function tegn() {
 }
 
 function loop() {
-  if (previewVentende && performance.now() - sidsteBevaegelse >= 150) {
+  if (!brugFliser && previewVentende && performance.now() - sidsteBevaegelse >= 150) {
     previewVentende = false;
     snavs = true;
   }
-  if (snavs) tegn();
+  if (snavs || (brugFliser && fliseMangler)) tegn();
   requestAnimationFrame(loop);
 }
 

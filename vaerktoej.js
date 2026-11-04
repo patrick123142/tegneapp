@@ -23,6 +23,8 @@ function opdaterKnapper() {
   trykTal.textContent = Math.round(trykFuld * 100) + ' %';
   trykKnap.classList.toggle('valgt', trykTil);
   trykKnap.setAttribute('aria-pressed', trykTil ? 'true' : 'false');
+  fliseKnap.textContent = 'Tegnemetode: ' + (brugFliser ? 'FLISER (hurtig)' : 'KLASSISK');
+  fliseKnap.classList.toggle('valgt', brugFliser);
   trykKnap.textContent = 'Tryk fra stylus: ' + (trykTil ? 'TIL' : 'FRA');
   trykDel.classList.toggle('skjult', !trykTil);
   styrkeGlider.value = String(Math.round(fastStyrke * 100));
@@ -67,8 +69,10 @@ function afslutStreg() {
   if (tegnerNu && tegnerNode) {
     const i = tegnerNode.strokes.lastIndexOf(tegnerNu);
     if (i >= 0) {
+      forenklStreg(tegnerNu);
       skubHandling({ type: 'tilfoej', node: tegnerNode, stroke: tegnerNu, index: i });
       flettIMellemlager(tegnerNu, tegnerNode);
+      fliserTilfoej(tegnerNu, tegnerNode);
     }
   }
   tegnerNu = null;
@@ -105,11 +109,15 @@ function fortryd() {
   if (h.type === 'tilfoej') {
     const i = h.node.strokes.indexOf(h.stroke);
     if (i >= 0) { h.node.strokes.splice(i, 1); antalStreger--; }
+    stregFjernet(h.stroke);
+    fliserUgyldig(h.node, h.stroke);
   } else {
     for (let k = h.items.length - 1; k >= 0; k--) {
       const it = h.items[k];
       it.node.strokes.splice(Math.min(it.index, it.node.strokes.length), 0, it.stroke);
       antalStreger++;
+      stregTilfoejet(it.stroke);
+      fliserUgyldig(it.node, it.stroke);
     }
   }
   gentagStak.push(h);
@@ -126,10 +134,14 @@ function gentag() {
   if (h.type === 'tilfoej') {
     h.node.strokes.splice(Math.min(h.index, h.node.strokes.length), 0, h.stroke);
     antalStreger++;
+    stregTilfoejet(h.stroke);
+    fliserUgyldig(h.node, h.stroke);
   } else {
     for (const it of h.items) {
       const i = it.node.strokes.indexOf(it.stroke);
       if (i >= 0) { it.node.strokes.splice(i, 1); antalStreger--; }
+      stregFjernet(it.stroke);
+      fliserUgyldig(it.node, it.stroke);
     }
   }
   fortrydStak.push(h);
@@ -176,6 +188,8 @@ function sletStregVed(px, py) {
     node.strokes.splice(i, 1);
     antalStreger--;
     sletItems.push({ node, stroke: s, index: i });
+    stregFjernet(s);
+    fliserUgyldig(node, s);
   }
   if (ramt.length) { baseGyldig = false; snavs = true; }
 }
@@ -221,6 +235,7 @@ function startStreg(sx, sy, tryk, type) {
     pr: brugTryk ? [medStylus ? trykKurve(tryk) : 0.6] : null,
     w: px / kamera.zoom,
     minX: wx, maxX: wx, minY: wy, maxY: wy,
+    _z0: kamera.zoom,                // zoom, da stregen blev tegnet (bruges til at forenkle den)
     _p: 0.6, _x: sx, _y: sy, _t: 0   // tilstand til simuleret tryk (bruges ikke ved gemning)
   };
   tegnerNode.strokes.push(tegnerNu);
@@ -263,3 +278,51 @@ function trykTilPunkt(streg, h) {
   return streg._p;
 }
 
+
+// ---------- forenkling af færdige streger ----------
+// Når en streg er færdig, fjernes punkter, der ligger næsten på en ret linje (mindre end ca. 0,2 pixel fra den,
+// målt ved den zoom, stregen blev tegnet med). Det kan ikke ses, men gør tegningen mindre og hurtigere.
+// Stregen forenkles kun én gang og ændres aldrig bagefter.
+function forenklStreg(s) {
+  const n = s.p.length / 2;
+  if (n < 4 || !s._z0) return;
+  const tol = 0.2 / s._z0, tol2 = tol * tol;
+  const behold = new Uint8Array(n);
+  behold[0] = 1; behold[n - 1] = 1;
+  const stak = [0, n - 1];
+  const p = s.p;
+  while (stak.length) {
+    const b = stak.pop(), a = stak.pop();
+    if (b <= a + 1) continue;
+    const ax = p[a * 2], ay = p[a * 2 + 1], bx = p[b * 2], by = p[b * 2 + 1];
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    let maks = -1, mi = -1;
+    for (let k = a + 1; k < b; k++) {
+      const px = p[k * 2] - ax, py = p[k * 2 + 1] - ay;
+      let d2;
+      if (l2 === 0) d2 = px * px + py * py;
+      else {
+        let t = (px * dx + py * dy) / l2;
+        t = t < 0 ? 0 : (t > 1 ? 1 : t);
+        const qx = px - t * dx, qy = py - t * dy;
+        d2 = qx * qx + qy * qy;
+      }
+      if (d2 > maks) { maks = d2; mi = k; }
+    }
+    if (maks > tol2) { behold[mi] = 1; stak.push(a, mi, mi, b); }
+  }
+  let antal = 0;
+  for (let k = 0; k < n; k++) antal += behold[k];
+  if (antal === n) return;
+  const np = new Array(antal * 2), npr = s.pr ? new Array(antal) : null;
+  let q = 0;
+  for (let k = 0; k < n; k++) {
+    if (!behold[k]) continue;
+    np[q * 2] = p[k * 2]; np[q * 2 + 1] = p[k * 2 + 1];
+    if (npr) npr[q] = s.pr[k];
+    q++;
+  }
+  s.p = np;
+  if (npr) s.pr = npr;
+  s._tp = null; s._tr = null;
+}

@@ -96,7 +96,7 @@ function erFelt(a) { return Array.isArray(a) || (ArrayBuffer.isView(a) && !(a in
 
 // Kontrollerer data og bygger et nyt træ. Kaster en fejl, hvis noget er forkert.
 // Rører ikke ved det åbne lærred.
-function byggFraData(d) {
+function byggFraData(d, gemtFlag) {
   const fejl = tekst => { throw new Error(tekst); };
   if (!d || typeof d !== 'object') fejl('Ingen data');
   if (d.format !== FORMAT_NAVN) fejl('Ukendt filformat');
@@ -150,7 +150,8 @@ function byggFraData(d) {
       }
       const streg = {
         id: sd.id, t: sd.t, c: sd.t === 'visk' ? null : (sd.c ? sd.c.toLowerCase() : '#000000'),
-        m: !!sd.m, a: sd.a, p, pr, w: sd.w, minX, maxX, minY, maxY
+        m: !!sd.m, a: sd.a, p, pr, w: sd.w, minX, maxX, minY, maxY,
+        _lagret: !!gemtFlag    // ligger allerede i databasen (bruges af det trinvise gem)
       };
       node.strokes.push(streg);
       if (sd.id > hoejesteId) hoejesteId = sd.id;
@@ -181,6 +182,8 @@ function indlaes(b) {
   bevaegelse = null; hoejreTraek = null;
   baseGyldig = false;
   baseKamera = null; forrigeKamera = null;
+  tomAlleFliser();
+  afventSlet.clear();
   skiftNiveau();
   sidstGemtKamera = { node: kamera.node, x: kamera.x, y: kamera.y, zoom: kamera.zoom };
   aendringsNr = 0; gemtNr = 0;
@@ -204,16 +207,78 @@ function renMeta(m) {
   };
 }
 
+// Et lærred ligger i databasen som:
+//   "struktur": niveauerne (uden streger), kameraet og tællere (lille)
+//   "streger": én post pr. streg, med nøglen "<lærred>|<id>"
+// Så gemmes kun nye streger, og gem koster det samme, uanset hvor stor tegningen er.
+// (Ældre lærreder, gemt som én stor post i "data", flyttes til det nye format første gang de gemmes.)
+
+function stregNoegle(laerredId, id) { return laerredId + '|' + String(id).padStart(12, '0'); }
+function stregInterval(laerredId) { return IDBKeyRange.bound(laerredId + '|', laerredId + '|\uffff'); }
+const RAEKKE_STOERRELSE = 4000;   // streger pr. læsning, så skærmen kan vise fremdrift
+
+// Fra den samlede datastruktur (som i eksportfiler) til struktur + streg-poster
+function dataTilPoster(id, data) {
+  const nider = data.noder.map(n => (typeof n.nid === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(n.nid)) ? n.nid : null);
+  const set = new Set();
+  for (let i = 0; i < nider.length; i++) {
+    if (!nider[i] || set.has(nider[i])) nider[i] = nytId();
+    set.add(nider[i]);
+  }
+  const struktur = {
+    id, format: data.format, version: data.version, naesteId: data.naesteId,
+    startNid: nider[data.startIndex],
+    kamera: { nodeNid: nider[data.kamera.nodeIndex], x: data.kamera.x, y: data.kamera.y, zoom: data.kamera.zoom },
+    noder: data.noder.map((n, i) => ({ nid: nider[i], parentNid: n.parent < 0 ? null : nider[n.parent], ox: n.ox, oy: n.oy, niveau: n.niveau }))
+  };
+  const streger = [];
+  data.noder.forEach((n, i) => {
+    for (const s of n.strokes) {
+      streger.push({ k: stregNoegle(id, s.id), laerredId: id, nid: nider[i], id: s.id, t: s.t, c: s.c, m: s.m, a: s.a, w: s.w, p: s.p, pr: s.pr });
+    }
+  });
+  return { struktur, streger };
+}
+
+// Modsat: saml struktur og streg-poster til den samlede datastruktur. Kontrolleres bagefter af byggFraData.
+function posterTilData(st, streger) {
+  if (!st || typeof st !== 'object' || !Array.isArray(st.noder) || st.noder.length < 1 || st.noder.length > MAX_NODER) throw new Error('Ugyldig struktur');
+  const idx = new Map();
+  st.noder.forEach((n, i) => {
+    if (!n || typeof n.nid !== 'string' || idx.has(n.nid)) throw new Error('Ugyldigt niveau-id');
+    idx.set(n.nid, i);
+  });
+  const noder = st.noder.map((n, i) => {
+    let parent = -1;
+    if (i > 0) { parent = idx.get(n.parentNid); if (parent === undefined) throw new Error('Ugyldig forælder'); }
+    return { parent, nid: n.nid, ox: n.ox, oy: n.oy, niveau: n.niveau, strokes: [] };
+  });
+  for (const r of streger) {
+    const i = r && idx.get(r.nid);
+    if (i === undefined) throw new Error('En streg hører ikke til noget niveau');
+    noder[i].strokes.push({ id: r.id, t: r.t, c: r.c, m: r.m, a: r.a, w: r.w, p: r.p, pr: r.pr });
+  }
+  const kam = st.kamera || {};
+  return {
+    format: st.format, version: st.version, naesteId: st.naesteId,
+    startIndex: idx.get(st.startNid),
+    kamera: { nodeIndex: idx.get(kam.nodeNid), x: kam.x, y: kam.y, zoom: kam.zoom },
+    noder
+  };
+}
+
 const lager = {
   db: null,
   init() {
     return new Promise((res, rej) => {
       if (typeof indexedDB === 'undefined') { rej(new Error('IndexedDB mangler')); return; }
-      const r = indexedDB.open('tegneapp', 1);
+      const r = indexedDB.open('tegneapp', 2);
       r.onupgradeneeded = () => {
         const d = r.result;
         if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'id' });
-        if (!d.objectStoreNames.contains('data')) d.createObjectStore('data', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('data')) d.createObjectStore('data', { keyPath: 'id' });       // ældre format
+        if (!d.objectStoreNames.contains('struktur')) d.createObjectStore('struktur', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('streger')) d.createObjectStore('streger', { keyPath: 'k' });
       };
       r.onsuccess = () => { this.db = r.result; res(); };
       r.onerror = () => rej(r.error || new Error('Kunne ikke åbne databasen'));
@@ -236,27 +301,60 @@ const lager = {
       rq.onsuccess = () => saet((rq.result || []).map(renMeta).filter(Boolean).sort((a, b) => b.aendret - a.aendret));
     });
   },
-  hentData(id) {
-    return this.tx(['data'], 'readonly', (t, saet) => {
-      const rq = t.objectStore('data').get(id);
-      rq.onsuccess = () => saet(rq.result ? rq.result.data : null);
+  // Henter et lærred som samlet datastruktur. nyFormat: false for lærreder gemt i det ældre format.
+  async hentLaerred(id, fremskridt) {
+    const st = await this.tx(['struktur'], 'readonly', (t, saet) => {
+      const rq = t.objectStore('struktur').get(id);
+      rq.onsuccess = () => saet(rq.result || null);
     });
+    if (!st) {
+      const gammel = await this.tx(['data'], 'readonly', (t, saet) => {
+        const rq = t.objectStore('data').get(id);
+        rq.onsuccess = () => saet(rq.result ? rq.result.data : null);
+      });
+      return gammel ? { data: gammel, nyFormat: false } : null;
+    }
+    const streger = [];
+    let efter = null;
+    for (;;) {
+      const raekke = await this.tx(['streger'], 'readonly', (t, saet) => {
+        const interval = efter === null ? stregInterval(id) : IDBKeyRange.bound(efter, id + '|\uffff', true, false);
+        const rq = t.objectStore('streger').getAll(interval, RAEKKE_STOERRELSE);
+        rq.onsuccess = () => saet(rq.result || []);
+      });
+      for (const r of raekke) streger.push(r);
+      if (fremskridt) fremskridt(streger.length);
+      if (raekke.length < RAEKKE_STOERRELSE) break;
+      efter = raekke[raekke.length - 1].k;
+    }
+    return { data: posterTilData(st, streger), nyFormat: true };
   },
-  opret(id, navn, data, antal) {
+  async hentData(id) {
+    const r = await this.hentLaerred(id);
+    return r ? r.data : null;
+  },
+  opret(id, navn, data, antal, miniature) {
     const nu = Date.now();
-    return this.tx(['meta', 'data'], 'readwrite', t => {
-      t.objectStore('meta').put({ id, navn, oprettet: nu, aendret: nu, miniature: null, antal: antal || 0 });
-      t.objectStore('data').put({ id, data });
+    const { struktur, streger } = dataTilPoster(id, data);
+    return this.tx(['meta', 'struktur', 'streger'], 'readwrite', t => {
+      t.objectStore('meta').put({ id, navn, oprettet: nu, aendret: nu, miniature: miniature || null, antal: antal || 0 });
+      t.objectStore('struktur').put(struktur);
+      const st = t.objectStore('streger');
+      for (const r of streger) st.put(r);
     });
   },
-  skriv(id, data, miniature, antal) {
-    return this.tx(['meta', 'data'], 'readwrite', t => {
-      const meta = t.objectStore('meta'), dat = t.objectStore('data');
+  // Trinvist gem: struktur, nye streger og fjernede streger i én handling
+  gem(id, struktur, nye, slettede, miniature, antal) {
+    return this.tx(['meta', 'struktur', 'streger', 'data'], 'readwrite', t => {
+      const meta = t.objectStore('meta'), st = t.objectStore('streger');
+      t.objectStore('struktur').put(struktur);
+      t.objectStore('data').delete(id);                       // et ældre, samlet gem er nu overflødigt
+      for (const sid of slettede) st.delete(stregNoegle(id, sid));
+      for (const r of nye) st.put(r);
       const rq = meta.get(id);
       rq.onsuccess = () => {
         const gl = rq.result || { id, navn: 'Lærred', oprettet: Date.now() };
         meta.put({ id, navn: gl.navn, oprettet: gl.oprettet, aendret: Date.now(), miniature: miniature || gl.miniature || null, antal });
-        dat.put({ id, data });
       };
     });
   },
@@ -268,27 +366,63 @@ const lager = {
     });
   },
   slet(id) {
-    return this.tx(['meta', 'data'], 'readwrite', t => {
+    return this.tx(['meta', 'data', 'struktur', 'streger'], 'readwrite', t => {
       t.objectStore('meta').delete(id);
       t.objectStore('data').delete(id);
+      t.objectStore('struktur').delete(id);
+      t.objectStore('streger').delete(stregInterval(id));
     });
   },
-  dupliker(id, nytId, nytNavn) {
-    return this.tx(['meta', 'data'], 'readwrite', t => {
-      const meta = t.objectStore('meta'), dat = t.objectStore('data');
-      const r1 = meta.get(id), r2 = dat.get(id);
-      let klar = 0;
-      const faerdig = () => {
-        if (++klar < 2 || !r1.result || !r2.result) return;
-        const nu = Date.now();
-        meta.put({ id: nytId, navn: nytNavn, oprettet: nu, aendret: nu, miniature: r1.result.miniature || null, antal: r1.result.antal || 0 });
-        dat.put({ id: nytId, data: r2.result.data });
-      };
-      r1.onsuccess = faerdig;
-      r2.onsuccess = faerdig;
-    });
+  async dupliker(id, nytId_, nytNavn) {
+    const metaListe = await this.alleMeta();
+    const m = metaListe.find(x => x.id === id);
+    const r = await this.hentLaerred(id);
+    if (!m || !r) throw new Error('Lærredet findes ikke mere');
+    await this.opret(nytId_, nytNavn, r.data, m.antal, m.miniature);
   }
 };
+
+// ---------- trinvist gem: hvad er ændret siden sidst? ----------
+
+const afventSlet = new Set();   // id'er på gemte streger, der er fjernet siden sidste gem
+
+function stregFjernet(s) {
+  s._fjernet = true;
+  if (s._lagret) { afventSlet.add(s.id); s._lagret = false; }
+}
+function stregTilfoejet(s) { s._fjernet = false; }
+
+// Saml det, der skal gemmes: strukturen og de streger, der ikke ligger i databasen endnu
+function indsamlGem(laerredId) {
+  let top = start;
+  while (top.parent) top = top.parent;
+  const behold = new Map();
+  (function maal(n) {
+    let ja = n === kamera.node || n === start || n.strokes.length > 0;
+    for (const c of n.children) if (maal(c)) ja = true;
+    behold.set(n, ja);
+    return ja;
+  })(top);
+  const noder = [], nye = [], refs = [];
+  (function skriv(n, foraeldreNid) {
+    if (!n.nid) n.nid = nytId();
+    noder.push({ nid: n.nid, parentNid: foraeldreNid, ox: n.ox, oy: n.oy, niveau: n.niveau });
+    for (const s of n.strokes) {
+      if (s._lagret || s === tegnerNu) continue;             // en streg under tegning gemmes først, når den er færdig
+      const d = stregTilData(s);
+      nye.push({ k: stregNoegle(laerredId, d.id), laerredId, nid: n.nid, id: d.id, t: d.t, c: d.c, m: d.m, a: d.a, w: d.w, p: d.p, pr: d.pr });
+      refs.push(s);
+    }
+    for (const c of n.children) if (behold.get(c)) skriv(c, n.nid);
+  })(top, null);
+  const struktur = {
+    id: laerredId, format: FORMAT_NAVN, version: FORMAT_VERSION, naesteId,
+    startNid: start.nid,
+    kamera: { nodeNid: kamera.node.nid, x: kamera.x, y: kamera.y, zoom: kamera.zoom },
+    noder
+  };
+  return { struktur, nye, refs, slettede: Array.from(afventSlet) };
+}
 
 function nytId() {
   try { if (crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* brug reserve */ }
@@ -325,6 +459,19 @@ function kameraAendretSidenGem() {
 
 function lavMiniature(tving) {
   try {
+    if (brugFliser) {
+      const kilde = tving ? sidsteBilledeTilMiniature(300) : kompSenest;
+      if (!kilde) return null;
+      const w = 240;
+      const h = Math.max(1, Math.round(w * kilde.height / kilde.width));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const x = c.getContext('2d');
+      x.fillStyle = '#ffffff';
+      x.fillRect(0, 0, w, h);
+      x.drawImage(kilde, 0, 0, w, h);
+      return c.toDataURL('image/png');
+    }
     sikrBase();
     if (!baseGyldig || !kameraLigBase()) {
       if (!tving) return null;
@@ -357,13 +504,18 @@ async function gemNu(medMiniature) {
       const id = aktivtId;
       const nr = aendringsNr;
       gemStatus.textContent = 'Gemmer…';
-      const data = tilData();
+      const snap = indsamlGem(id);
       const kamKopi = { node: kamera.node, x: kamera.x, y: kamera.y, zoom: kamera.zoom };
       const mini = lavMiniature(medMiniature);
-      await lager.skriv(id, data, mini, antalStreger);
+      await lager.gem(id, snap.struktur, snap.nye, snap.slettede, mini, antalStreger);
       if (id === aktivtId) {
         gemtNr = nr;
         sidstGemtKamera = kamKopi;
+        for (const s of snap.refs) {
+          if (s._fjernet) afventSlet.add(s.id);      // blev fjernet, mens der blev gemt: skal slettes ved næste gem
+          else s._lagret = true;
+        }
+        for (const x of snap.slettede) afventSlet.delete(x);
       }
       gemStatus.textContent = 'Gemt';
     } while (gemIgen);
@@ -496,12 +648,14 @@ async function aabnLaerred(id) {
   optaget = true;
   galleriBesked.textContent = 'Åbner…';
   try {
-    const data = await lager.hentData(id);
-    if (!data) throw new Error('Lærredet findes ikke mere');
-    const bygget = byggFraData(data);
+    const r = await lager.hentLaerred(id, n => { galleriBesked.textContent = 'Åbner… ' + n + ' streger indlæst'; });
+    if (!r) throw new Error('Lærredet findes ikke mere');
+    galleriBesked.textContent = 'Åbner…';
+    const bygget = byggFraData(r.data, r.nyFormat);
     aktivtId = id;
     indlaes(bygget);
-    gemStatus.textContent = 'Gemt';
+    if (!r.nyFormat) markerAendret();                 // ældre lærred: flyttes til det nye format ved næste gem
+    else gemStatus.textContent = 'Gemt';
     galleriBesked.textContent = '';
     visGalleriSkaerm(false);
     skaler();
@@ -514,7 +668,7 @@ async function aabnLaerred(id) {
 
 async function aabnUdenLagring() {
   aktivtId = null;
-  indlaes(byggFraData(tomData()));
+  indlaes(byggFraData(tomData(), false));
   gemStatus.textContent = 'Gemmes ikke';
   visGalleriSkaerm(false);
   skaler();

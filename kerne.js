@@ -7,6 +7,7 @@ function skaler() {
   hoejde = window.innerHeight;
   laerred.width = Math.round(bredde * dpr);
   laerred.height = Math.round(hoejde * dpr);
+  maalB = bredde; maalH = hoejde;
   baseGyldig = false;
   snavs = true;
 }
@@ -160,8 +161,9 @@ function ddMulS(h, l) {               // (h + l) * S
 
 // Besøg alle streger i et niveau (og dets børn), som kan ses med kameraet (kx, ky, z)
 // udtrykt i dette niveaus koordinater. "ikke" er et barn, der springes over.
-function gennemloebNode(node, kxh, kxl, kyh, kyl, z, ikke, besog) {
-  const cx = bredde / 2, cy = hoejde / 2;
+function gennemloebNode(node, kxh, kxl, kyh, kyl, z, ikke, besog, vb, vh) {
+  // vb, vh: størrelsen på det område, der kigges på (standard: hele skærmen)
+  const cx = (vb || bredde) / 2, cy = (vh || hoejde) / 2;
   const halvB = cx / z, halvH = cy / z;
   const vMinX = kxh - halvB, vMaxX = kxh + halvB;
   const vMinY = kyh - halvH, vMaxY = kyh + halvH;
@@ -185,28 +187,30 @@ function gennemloebNode(node, kxh, kxl, kyh, kyl, z, ikke, besog) {
     if (b.maxX < nx[0] - hb || b.minX > nx[0] + hb ||
         b.maxY < ny[0] - hh || b.minY > ny[0] + hh) continue;
     if (Math.max(b.maxX - b.minX, b.maxY - b.minY) * cz < 0.5) continue;
-    gennemloebNode(ch, nx[0], nx[1], ny[0], ny[1], cz, null, besog);
+    gennemloebNode(ch, nx[0], nx[1], ny[0], ny[1], cz, null, besog, vb, vh);
   }
 }
 
-function gennemloebAlt(besog) {
-  // Forfædre (større niveauer) først, så kameraets eget niveau og dets børn
+function gennemloebAlt(besog, kam, vb, vh, graense) {
+  // Forfædre (større niveauer) først, så kameraets eget niveau og dets børn.
+  // kam (valgfri): et andet kamera end det rigtige, fx midten af en flise.
+  const k0 = kam || kamera;
   const kaede = [];
-  let n = kamera.node, z = kamera.zoom;
-  let xh = kamera.x, xl = 0, yh = kamera.y, yl = 0;
+  let n = k0.node, z = k0.zoom;
+  let xh = k0.x, xl = 0, yh = k0.y, yl = 0;
   while (n.parent) {
     const p = n.parent;
     let t = ddDivS(xh, xl); t = ddPlus(t[0], t[1], n.ox); xh = t[0]; xl = t[1];
     t = ddDivS(yh, yl); t = ddPlus(t[0], t[1], n.oy); yh = t[0]; yl = t[1];
     z = z * S;
-    if (z > MAX_ANCESTOR_ZOOM) break;
+    if (z > (graense || MAX_ANCESTOR_ZOOM)) break;
     kaede.push({ node: p, xh, xl, yh, yl, z, ikke: n });
     n = p;
   }
   for (let i = kaede.length - 1; i >= 0; i--) {
     const k = kaede[i];
-    gennemloebNode(k.node, k.xh, k.xl, k.yh, k.yl, k.z, k.ikke, besog);
+    gennemloebNode(k.node, k.xh, k.xl, k.yh, k.yl, k.z, k.ikke, besog, vb, vh);
   }
-  gennemloebNode(kamera.node, kamera.x, 0, kamera.y, 0, kamera.zoom, null, besog);
+  gennemloebNode(k0.node, k0.x, 0, k0.y, 0, k0.zoom, null, besog, vb, vh);
 }
 
